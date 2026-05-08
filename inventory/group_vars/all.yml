@@ -1,0 +1,17 @@
+---
+# Variables for ALL hosts in the inventory
+
+cluster_name: astrolumina
+environment: production
+ansible_version: "2.14+"
+
+# Common packages to ensure
+common_packages:
+  - curl
+  - wget
+  - vim
+  - git
+
+# Logging settings
+log_level: info
+log_dir: /var/log/ansible

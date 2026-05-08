@@ -1,0 +1,81 @@
+---
+# Playbook: Gather Hostnames
+# Purpose: Collect hostname and variable information from all hosts
+# Usage: ansible-playbook playbooks/gather_hostnames.yml
+
+- name: Display all variables per host (group_vars + host_vars)
+  hosts: all
+  gather_facts: true
+  tasks:
+    # =====================================================
+    # Display hostname information
+    # =====================================================
+    - name: Show hostname details
+      ansible.builtin.debug:
+        msg: |
+          ============================================
+          HOST: {{ inventory_hostname }}
+          ============================================
+          Ansible Hostname: {{ ansible_hostname }}
+          Primary IP: {{ ansible_host }}
+
+    # =====================================================
+    # Display group_vars (all)
+    # =====================================================
+    - name: Display group_vars (all) - cluster settings
+      ansible.builtin.debug:
+        msg: |
+          --- group_vars: all ---
+          Cluster Name: {{ cluster_name }}
+          Environment: production
+
+    # =====================================================
+    # Display group_vars (control_plane or workers)
+    # =====================================================
+    - name: Display group_vars (role-specific)
+      ansible.builtin.debug:
+        msg: |
+          --- group_vars: {{ rke2_role }} ---
+          RKE2 Role: {{ rke2_role }}
+          Node Label: {% if rke2_role == 'server' %}{{ control_plane_label }}{% else %}{{ worker_label }}{% endif %}
+          Taint: {{ node_taint }}
+
+    # =====================================================
+    # Display host_vars (specific to this host)
+    # =====================================================
+    - name: Display host_vars - hardware
+      ansible.builtin.debug:
+        msg: |
+          --- host_vars: {{ inventory_hostname }} ---
+          Datacenter: {{ datacenter }}
+          Rack: {{ rack }}
+          Location: {{ physical_location }}
+          CPU Cores: {{ cpu_cores }}
+          Memory: {{ memory_gb }}GB
+
+    # =====================================================
+    # Display host_vars - network
+    # =====================================================
+    - name: Display host_vars - network
+      ansible.builtin.debug:
+        msg: |
+          --- host_vars: network ---
+          Primary IP: {{ primary_ip }}
+          Management IP: {{ management_ip }}
+          RKE2 Server URL: {{ rke2_server_url }}
+
+- name: Call display_variable role with different custom_message per group
+  hosts: control_plane
+  gather_facts: false
+  vars:
+    custom_message: "Message from control_plane group"
+  roles:
+    - display_variable
+
+- name: Call display_variable role with different custom_message per group
+  hosts: workers
+  gather_facts: false
+  vars:
+    custom_message: "Message from workers group"
+  roles:
+    - display_variable

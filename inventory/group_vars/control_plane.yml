@@ -1,0 +1,17 @@
+---
+# Variables for control_plane group (RKE2 servers)
+
+rke2_role: server
+rke2_components:
+  - etcd
+  - control-plane
+  - api-server
+  - scheduler
+  - controller-manager
+
+control_plane_label: rke2-master
+node_taint: "node-role.kubernetes.io/master:NoSchedule"
+
+# Monitoring
+monitoring_enabled: true
+prometheus_port: 9090
