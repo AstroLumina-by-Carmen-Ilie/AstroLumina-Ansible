@@ -26,10 +26,10 @@ AstroLumina-Ansible/
 
 The inventory defines the RKE2 cluster nodes:
 
-| Host | Role | IP Address |
-|------|------|-------------|
-| rke2-cp-01 | Control Plane | 192.168.122.10 |
-| rke2-worker-01 | Worker | 192.168.122.11 |
+| Host           | Role          | IP Address     |
+| -------------- | ------------- | -------------- |
+| rke2-cp-01     | Control Plane | 192.168.122.10 |
+| rke2-worker-01 | Worker        | 192.168.122.11 |
 
 ### Groups
 
