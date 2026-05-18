@@ -1,15 +1,15 @@
 ---
-# ============================================================
-# RKE2 Agent (Worker) - Instalare & Configurare
-# ============================================================
+# RKE2 Agent (Worker) — installation & configuration
 
-# --- Instalare binare RKE2 ---
-- name: Verifica daca RKE2 este deja instalat
+# Verificam daca binarul RKE2 exista deja (idempotent — sarim daca e deja instalat).
+- name: Check if RKE2 is already installed
   stat:
     path: /usr/local/bin/rke2
   register: rke2_binary
 
-- name: Instaleaza RKE2 agent din artefacte locale (airgap)
+# Instalarea agentului. Similar cu server-ul, dar TYPE="agent".
+# Artefactele locale sunt folosite in loc de download din internet (airgap).
+- name: Install RKE2 agent from local artifacts (airgap)
   shell: |
     INSTALL_RKE2_ARTIFACT_PATH="{{ artifacts_remote_path }}" \
     INSTALL_RKE2_TYPE="agent" \
@@ -20,24 +20,29 @@
   when: not rke2_binary.stat.exists
   register: rke2_install_result
 
-- name: Afiseaza output instalare
+# Afisam output-ul doar daca instalarea a avut loc (changed).
+- name: Display installation output
   debug:
     var: rke2_install_result.stdout_lines
   when: rke2_install_result is changed
 
-# --- Configurare RKE2 agent ---
-- name: Construieste configuratia agent
+# Configurarea agentului:
+# server = adresa serverului RKE2 (port 9345 = portul de join pentru agenti).
+# token  = secretul shared care autorizeaza agentul sa se conecteze la cluster.
+- name: Build agent configuration
   set_fact:
     rke2_agent_config:
       server: "https://{{ rke2_server_ip }}:9345"
       token: "{{ rke2_token }}"
 
-- name: Combina cu configuratia extra (daca exista)
+# Combinam cu orice configuratie extra definita in group_vars.
+- name: Merge with extra configuration (if any)
   set_fact:
     rke2_agent_config: "{{ rke2_agent_config | combine(rke2_agent_extra_config) }}"
   when: rke2_agent_extra_config | length > 0
 
-- name: Scrie config.yaml pentru agent
+# Scriem config.yaml pentru agent. RKE2 agentul citeste acest fisier la pornire.
+- name: Write agent config.yaml
   copy:
     content: "{{ rke2_agent_config | to_nice_yaml(indent=2) }}"
     dest: "{{ rke2_config_dir }}/config.yaml"
@@ -46,16 +51,18 @@
     mode: "0600"
   notify: Restart rke2-agent
 
-# --- Enable & Start serviciu ---
-- name: Enable si porneste rke2-agent
+# Activam si pornim serviciul rke2-agent.
+- name: Enable and start rke2-agent
   systemd:
     name: rke2-agent
     state: started
     enabled: true
     daemon_reload: true
 
-# --- Asteapta ca worker-ul sa se alature cluster-ului ---
-- name: Asteapta ca worker-ul sa fie Ready (verificat de pe control-plane)
+# Verificam ca worker-ul s-a alaturat clusterului si e Ready.
+# delegate_to: control_plane = verificarea ruleaza pe server, nu pe worker,
+# pentru ca doar server-ul are kubectl configurat.
+- name: Wait for worker to be Ready (verified from control-plane)
   shell: |
     /var/lib/rancher/rke2/bin/kubectl \
       --kubeconfig /etc/rancher/rke2/rke2.yaml \
@@ -68,6 +75,6 @@
   changed_when: false
   delegate_to: "{{ groups['control_plane'][0] }}"
 
-- name: Afiseaza mesaj succes
+- name: Display success message
   debug:
-    msg: "✅ Worker {{ inventory_hostname }} s-a alăturat cluster-ului cu succes!"
+    msg: "Worker {{ inventory_hostname }} joined the cluster successfully!"

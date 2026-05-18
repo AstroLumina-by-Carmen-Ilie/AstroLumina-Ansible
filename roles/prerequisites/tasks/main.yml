@@ -1,15 +1,16 @@
 ---
-# ============================================================
-# Prerequisites - ruleaza pe toate nodurile (server + agent)
-# ============================================================
+# Prerequisites — runs on all nodes (server + agent)
 
-- name: Verifica ca sistemul este Linux
+# Verificam ca sistemul de operare este Linux. RKE2 nu ruleaza pe Windows/macOS.
+- name: Verify system is Linux
   assert:
     that: ansible_system == "Linux"
-    fail_msg: "RKE2 suporta doar Linux"
+    fail_msg: "RKE2 only supports Linux"
 
-# --- Kernel modules necesare ---
-- name: Incarca kernel modules necesare
+# Incarcam modulele kernel necesare: overlay (pentru storage driver-ul containerelor)
+# si br_netfilter (pentru ca traficul intre containere sa treaca prin iptables).
+# persistent: true face ca modulele sa fie incarcate si la reboot.
+- name: Load required kernel modules
   community.general.modprobe:
     name: "{{ item }}"
     state: present
@@ -18,8 +19,12 @@
     - overlay
     - br_netfilter
 
-# --- Parametri kernel (sysctl) ---
-- name: Seteaza parametrii sysctl pentru Kubernetes networking
+# Configurarile de retea pentru Kubernetes:
+# bridge-nf-call-* = traficul intre containere (pe bridge) trece prin iptables,
+#   altfel regulile de NetworkPolicy nu functioneaza.
+# ip_forward = permite routing-ul intre pod-uri de pe noduri diferite.
+# ipv6 forwarding = necesar pentru dual-stack sau CNI-uri care folosesc IPv6 intern.
+- name: Set sysctl parameters for Kubernetes networking
   ansible.posix.sysctl:
     name: "{{ item.key }}"
     value: "{{ item.value }}"
@@ -32,53 +37,59 @@
     - { key: "net.ipv4.ip_forward",                 value: "1" }
     - { key: "net.ipv6.conf.all.forwarding",         value: "1" }
 
-# --- Disable swap (Kubernetes requirement) ---
-- name: Opreste swap imediat
+# Dezactivam swap imediat. Kubernetes nu functioneaza cu swap activ —
+# kubelet refuza sa porneasca daca swap este on.
+- name: Disable swap immediately
   command: swapoff -a
   changed_when: false
 
-- name: Disable swap permanent (fstab)
+# Dezactivam swap permanent — comentam liniile swap din /etc/fstab
+# ca sa nu fie reactivate la urmatorul reboot.
+- name: Disable swap permanently (fstab)
   replace:
     path: /etc/fstab
     regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
     replace: '# \1'
 
-# --- Firewall: dezactivare sau configurare ---
-# Daca vrei sa pastrezi firewall-ul activ, comenteaza blocul de mai jos
-# si decomenseaza sectiunea cu porturile specifice.
-- name: Disable firewalld (daca exista)
+# Oprim firewalld daca exista. RKE2 isi gestioneaza singur regulile de retea.
+# ignore_errors = nu crapa daca serviciul nu e instalat.
+- name: Disable firewalld (if present)
   service:
     name: firewalld
     state: stopped
     enabled: false
-  ignore_errors: true   # nu esua daca nu e instalat
+  ignore_errors: true
 
-- name: Disable ufw (daca exista)
+# Oprim ufw daca exista. Motivul e acelasi ca la firewalld.
+- name: Disable ufw (if present)
   service:
     name: ufw
     state: stopped
     enabled: false
   ignore_errors: true
 
-# Porturile necesare (decomenseaza daca pastrezi firewall):
-# Control Plane: 6443, 9345, 2379-2380, 10250, 10257, 10259
-# Workers: 10250
-# CNI (canal): 8472/udp (VXLAN), 4240/tcp (Cilium health)
-
-# --- Hostname ---
-- name: Seteaza hostname
+# Setam hostname-ul nodului. Folosim hostname_override din host_vars
+# daca exista, altfel inventory_hostname (numele din inventar).
+- name: Set hostname
   hostname:
-    name: "{{ inventory_hostname }}"
+    name: "{{ hostname_override | default(inventory_hostname) }}"
 
-- name: Asigura-te ca hostname-ul e in /etc/hosts
+# Adaugam hostname-ul in /etc/hosts pe 127.0.1.1.
+# Unele distributii (Ubuntu) folosesc aceasta conventie in loc de 127.0.0.1
+# pentru hostname, ca sa nu interfereze cu loopback-ul real.
+- name: Ensure hostname is in /etc/hosts
   lineinfile:
     path: /etc/hosts
     regexp: '^127\.0\.1\.1\s'
-    line: "127.0.1.1 {{ inventory_hostname }}"
+    line: "127.0.1.1 {{ hostname_override | default(inventory_hostname) }}"
     state: present
 
-# --- Creeaza directoarele RKE2 ---
-- name: Creeaza directoare RKE2
+# Cream directoarele necesare pentru RKE2:
+# config_dir = unde sta config.yaml
+# data_dir = datele RKE2 (binare, etcd, etc.)
+# images_dir = imaginile containerelor (pentru airgap)
+# artifacts_remote_path = unde copiem arhivele descarcate
+- name: Create RKE2 directories
   file:
     path: "{{ item }}"
     state: directory
@@ -91,8 +102,9 @@
     - "{{ rke2_images_dir }}"
     - "{{ artifacts_remote_path }}"
 
-# --- Copiaza artefactele pe nod ---
-- name: Copiaza artefactele RKE2 pe nod
+# Copiem arhivele RKE2 de pe masina locala pe nodul remote.
+# Acestea sunt binarele RKE2 si hash-urile de verificare.
+- name: Copy RKE2 artifacts to node
   copy:
     src: "{{ artifacts_local_path }}/{{ item }}"
     dest: "{{ artifacts_remote_path }}/{{ item }}"
@@ -104,7 +116,8 @@
     - "rke2-images.linux-{{ rke2_arch }}.tar.zst"
     - "sha256sum-{{ rke2_arch }}.txt"
 
-- name: Copiaza install.sh pe nod
+# Copiem scriptul de instalare separat — are nevoie de permisiune de executie.
+- name: Copy install.sh to node
   copy:
     src: "{{ artifacts_local_path }}/install.sh"
     dest: "{{ artifacts_remote_path }}/install.sh"
@@ -112,8 +125,10 @@
     group: root
     mode: "0755"
 
-# --- Copiaza imaginile container in directorul agent ---
-- name: Copiaza imaginile container in images dir
+# Copiem imaginea containerelor in directorul unde RKE2 o asteapta.
+# La airgap install, RKE2 nu poate descarca imagini din internet,
+# deci trebuie sa le punem manual in agent/images/.
+- name: Copy container images to images directory
   copy:
     src: "{{ artifacts_local_path }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
     dest: "{{ rke2_images_dir }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
@@ -121,4 +136,3 @@
     group: root
     mode: "0644"
     remote_src: false
-  # Nota: RKE2 va incarca automat imaginile din acest director la start

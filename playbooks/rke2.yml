@@ -5,7 +5,7 @@
 #   ansible-playbook playbooks/rke2.yml --tags server
 #   ansible-playbook playbooks/rke2.yml --tags agent
 
-- name: Pregateste toate nodurile
+- name: Prepare all nodes
   hosts: all
   become: true
   gather_facts: true
@@ -13,7 +13,7 @@
   roles:
     - role: prerequisites
 
-- name: Instaleaza RKE2 Control Plane
+- name: Install RKE2 Control Plane
   hosts: control_plane
   become: true
   gather_facts: true
@@ -21,7 +21,7 @@
   roles:
     - role: rke2_server
 
-- name: Instaleaza RKE2 Workers
+- name: Install RKE2 Workers
   hosts: workers
   become: true
   gather_facts: true
