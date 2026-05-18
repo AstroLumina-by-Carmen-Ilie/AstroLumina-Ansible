@@ -1,0 +1,31 @@
+---
+# Usage:
+#   ansible-playbook playbooks/rke2.yml
+#   ansible-playbook playbooks/rke2.yml --tags prerequisites
+#   ansible-playbook playbooks/rke2.yml --tags server
+#   ansible-playbook playbooks/rke2.yml --tags agent
+
+- name: Pregateste toate nodurile
+  hosts: all
+  become: true
+  gather_facts: true
+  tags: [prerequisites, always]
+  roles:
+    - role: prerequisites
+
+- name: Instaleaza RKE2 Control Plane
+  hosts: control_plane
+  become: true
+  gather_facts: true
+  tags: [server]
+  roles:
+    - role: rke2_server
+
+- name: Instaleaza RKE2 Workers
+  hosts: workers
+  become: true
+  gather_facts: true
+  tags: [agent]
+  serial: 1
+  roles:
+    - role: rke2_agent

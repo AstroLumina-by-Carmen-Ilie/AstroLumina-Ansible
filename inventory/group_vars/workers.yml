@@ -2,14 +2,3 @@
 # Variables for workers group (RKE2 agents)
 
 rke2_role: agent
-worker_label: rke2-worker
-node_taint: "node.kubernetes.io/not-ready:NoSchedule"
-
-# Workload settings
-max_pods: 110
-cpu_limit: "4"
-memory_limit: "8Gi"
-
-# Monitoring
-monitoring_enabled: true
-node_exporter_port: 9100

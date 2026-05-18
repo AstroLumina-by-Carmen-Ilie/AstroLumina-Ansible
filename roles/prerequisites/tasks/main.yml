@@ -1,0 +1,124 @@
+---
+# ============================================================
+# Prerequisites - ruleaza pe toate nodurile (server + agent)
+# ============================================================
+
+- name: Verifica ca sistemul este Linux
+  assert:
+    that: ansible_system == "Linux"
+    fail_msg: "RKE2 suporta doar Linux"
+
+# --- Kernel modules necesare ---
+- name: Incarca kernel modules necesare
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop:
+    - overlay
+    - br_netfilter
+
+# --- Parametri kernel (sysctl) ---
+- name: Seteaza parametrii sysctl pentru Kubernetes networking
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-rke2.conf
+  loop:
+    - { key: "net.bridge.bridge-nf-call-iptables",  value: "1" }
+    - { key: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+    - { key: "net.ipv4.ip_forward",                 value: "1" }
+    - { key: "net.ipv6.conf.all.forwarding",         value: "1" }
+
+# --- Disable swap (Kubernetes requirement) ---
+- name: Opreste swap imediat
+  command: swapoff -a
+  changed_when: false
+
+- name: Disable swap permanent (fstab)
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+    replace: '# \1'
+
+# --- Firewall: dezactivare sau configurare ---
+# Daca vrei sa pastrezi firewall-ul activ, comenteaza blocul de mai jos
+# si decomenseaza sectiunea cu porturile specifice.
+- name: Disable firewalld (daca exista)
+  service:
+    name: firewalld
+    state: stopped
+    enabled: false
+  ignore_errors: true   # nu esua daca nu e instalat
+
+- name: Disable ufw (daca exista)
+  service:
+    name: ufw
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+# Porturile necesare (decomenseaza daca pastrezi firewall):
+# Control Plane: 6443, 9345, 2379-2380, 10250, 10257, 10259
+# Workers: 10250
+# CNI (canal): 8472/udp (VXLAN), 4240/tcp (Cilium health)
+
+# --- Hostname ---
+- name: Seteaza hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Asigura-te ca hostname-ul e in /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: "127.0.1.1 {{ inventory_hostname }}"
+    state: present
+
+# --- Creeaza directoarele RKE2 ---
+- name: Creeaza directoare RKE2
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ rke2_config_dir }}"
+    - "{{ rke2_data_dir }}"
+    - "{{ rke2_images_dir }}"
+    - "{{ artifacts_remote_path }}"
+
+# --- Copiaza artefactele pe nod ---
+- name: Copiaza artefactele RKE2 pe nod
+  copy:
+    src: "{{ artifacts_local_path }}/{{ item }}"
+    dest: "{{ artifacts_remote_path }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "rke2.linux-{{ rke2_arch }}.tar.gz"
+    - "rke2-images.linux-{{ rke2_arch }}.tar.zst"
+    - "sha256sum-{{ rke2_arch }}.txt"
+
+- name: Copiaza install.sh pe nod
+  copy:
+    src: "{{ artifacts_local_path }}/install.sh"
+    dest: "{{ artifacts_remote_path }}/install.sh"
+    owner: root
+    group: root
+    mode: "0755"
+
+# --- Copiaza imaginile container in directorul agent ---
+- name: Copiaza imaginile container in images dir
+  copy:
+    src: "{{ artifacts_local_path }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
+    dest: "{{ rke2_images_dir }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
+    owner: root
+    group: root
+    mode: "0644"
+    remote_src: false
+  # Nota: RKE2 va incarca automat imaginile din acest director la start

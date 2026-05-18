@@ -3,15 +3,31 @@
 
 cluster_name: astrolumina
 environment: production
-ansible_version: "2.14+"
 
-# Common packages to ensure
-common_packages:
-  - curl
-  - wget
-  - vim
-  - git
+# ============================================================
+# RKE2 Airgap - Global Variables
+# ============================================================
 
-# Logging settings
-log_level: info
-log_dir: /var/log/ansible
+rke2_version: "v1.31.4+rke2r1"
+rke2_arch: "amd64"
+
+rke2_token: "bbdf1f7c611f2d94ae2c556ef1287b1f4dada71ee5f9283be69b57798f5814b2"
+
+artifacts_local_path: "/home/daniel/Workdir/AstroLumina/AstroLumina-Ansible/rke2-artifacts"
+artifacts_remote_path: "/opt/rke2-artifacts"
+
+rke2_server_ip: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
+
+rke2_api_port: 6443
+
+rke2_cni: "canal"
+
+rke2_disable: []
+
+rke2_server_extra_config: {}
+
+rke2_agent_extra_config: {}
+
+rke2_config_dir: "/etc/rancher/rke2"
+rke2_data_dir: "/var/lib/rancher/rke2"
+rke2_images_dir: "/var/lib/rancher/rke2/agent/images"

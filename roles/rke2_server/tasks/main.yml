@@ -1,0 +1,107 @@
+---
+# ============================================================
+# RKE2 Server (Control Plane) - Instalare & Configurare
+# ============================================================
+
+# --- Instalare binare RKE2 ---
+- name: Verifica daca RKE2 este deja instalat
+  stat:
+    path: /usr/local/bin/rke2
+  register: rke2_binary
+
+- name: Instaleaza RKE2 server din artefacte locale (airgap)
+  shell: |
+    INSTALL_RKE2_ARTIFACT_PATH="{{ artifacts_remote_path }}" \
+    INSTALL_RKE2_TYPE="server" \
+    INSTALL_RKE2_VERSION="{{ rke2_version }}" \
+    bash {{ artifacts_remote_path }}/install.sh
+  args:
+    executable: /bin/bash
+  when: not rke2_binary.stat.exists
+  register: rke2_install_result
+
+- name: Afiseaza output instalare
+  debug:
+    var: rke2_install_result.stdout_lines
+  when: rke2_install_result is changed
+
+# --- Configurare RKE2 server ---
+- name: Construieste configuratia server
+  set_fact:
+    rke2_server_config:
+      token: "{{ rke2_token }}"
+      tls-san:
+        - "{{ ansible_host }}"
+        - "{{ inventory_hostname }}"
+      cni: "{{ rke2_cni }}"
+      disable: "{{ rke2_disable | default([]) }}"
+
+- name: Combina cu configuratia extra (daca exista)
+  set_fact:
+    rke2_server_config: "{{ rke2_server_config | combine(rke2_server_extra_config) }}"
+  when: rke2_server_extra_config | length > 0
+
+- name: Scrie config.yaml pentru server
+  copy:
+    content: "{{ rke2_server_config | to_nice_yaml(indent=2) }}"
+    dest: "{{ rke2_config_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart rke2-server
+
+# --- Enable & Start serviciu ---
+- name: Enable si porneste rke2-server
+  systemd:
+    name: rke2-server
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# --- Asteapta ca API server-ul sa fie ready ---
+- name: Asteapta ca rke2-server sa fie activ (max 5 min)
+  wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ rke2_api_port }}"
+    timeout: 300
+    delay: 15
+
+- name: Asteapta ca node-ul sa fie Ready
+  shell: |
+    /var/lib/rancher/rke2/bin/kubectl \
+      --kubeconfig /etc/rancher/rke2/rke2.yaml \
+      get nodes {{ inventory_hostname }} \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  register: node_ready
+  until: node_ready.stdout == "True"
+  retries: 20
+  delay: 15
+  changed_when: false
+
+# --- Extrage kubeconfig si token pentru agenti ---
+- name: Citeste kubeconfig de pe server
+  slurp:
+    src: /etc/rancher/rke2/rke2.yaml
+  register: rke2_kubeconfig_raw
+
+- name: Salveaza kubeconfig local (cu IP-ul corect)
+  copy:
+    content: >-
+      {{
+        rke2_kubeconfig_raw.content
+        | b64decode
+        | replace('127.0.0.1', ansible_host)
+        | replace('localhost', ansible_host)
+      }}
+    dest: "./rke2-kubeconfig.yaml"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Afiseaza mesaj succes
+  debug:
+    msg:
+      - "✅ RKE2 Control Plane instalat cu succes!"
+      - "   Kubeconfig salvat local: ./rke2-kubeconfig.yaml"
+      - "   Export: export KUBECONFIG=$(pwd)/rke2-kubeconfig.yaml"
+      - "   Test: kubectl get nodes"

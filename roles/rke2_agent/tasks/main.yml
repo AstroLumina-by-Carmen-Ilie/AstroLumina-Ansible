@@ -1,0 +1,73 @@
+---
+# ============================================================
+# RKE2 Agent (Worker) - Instalare & Configurare
+# ============================================================
+
+# --- Instalare binare RKE2 ---
+- name: Verifica daca RKE2 este deja instalat
+  stat:
+    path: /usr/local/bin/rke2
+  register: rke2_binary
+
+- name: Instaleaza RKE2 agent din artefacte locale (airgap)
+  shell: |
+    INSTALL_RKE2_ARTIFACT_PATH="{{ artifacts_remote_path }}" \
+    INSTALL_RKE2_TYPE="agent" \
+    INSTALL_RKE2_VERSION="{{ rke2_version }}" \
+    bash {{ artifacts_remote_path }}/install.sh
+  args:
+    executable: /bin/bash
+  when: not rke2_binary.stat.exists
+  register: rke2_install_result
+
+- name: Afiseaza output instalare
+  debug:
+    var: rke2_install_result.stdout_lines
+  when: rke2_install_result is changed
+
+# --- Configurare RKE2 agent ---
+- name: Construieste configuratia agent
+  set_fact:
+    rke2_agent_config:
+      server: "https://{{ rke2_server_ip }}:9345"
+      token: "{{ rke2_token }}"
+
+- name: Combina cu configuratia extra (daca exista)
+  set_fact:
+    rke2_agent_config: "{{ rke2_agent_config | combine(rke2_agent_extra_config) }}"
+  when: rke2_agent_extra_config | length > 0
+
+- name: Scrie config.yaml pentru agent
+  copy:
+    content: "{{ rke2_agent_config | to_nice_yaml(indent=2) }}"
+    dest: "{{ rke2_config_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart rke2-agent
+
+# --- Enable & Start serviciu ---
+- name: Enable si porneste rke2-agent
+  systemd:
+    name: rke2-agent
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# --- Asteapta ca worker-ul sa se alature cluster-ului ---
+- name: Asteapta ca worker-ul sa fie Ready (verificat de pe control-plane)
+  shell: |
+    /var/lib/rancher/rke2/bin/kubectl \
+      --kubeconfig /etc/rancher/rke2/rke2.yaml \
+      get nodes {{ inventory_hostname }} \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  register: worker_ready
+  until: worker_ready.stdout == "True"
+  retries: 20
+  delay: 15
+  changed_when: false
+  delegate_to: "{{ groups['control_plane'][0] }}"
+
+- name: Afiseaza mesaj succes
+  debug:
+    msg: "✅ Worker {{ inventory_hostname }} s-a alăturat cluster-ului cu succes!"

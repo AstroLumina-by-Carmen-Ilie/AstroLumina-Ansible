@@ -1,0 +1,11 @@
+---
+all:
+  children:
+    control_plane:
+      hosts:
+        rke2-cp-01:
+          ansible_host: 192.168.122.10
+    workers:
+      hosts:
+        rke2-worker-01:
+          ansible_host: 192.168.122.11
