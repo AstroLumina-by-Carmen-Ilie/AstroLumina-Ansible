@@ -37,7 +37,6 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Restart rke2-agent
 
 - name: Enable and start rke2-agent
   systemd:

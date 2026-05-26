@@ -40,7 +40,6 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Restart rke2-server
 
 - name: Enable and start rke2-server
   systemd:
