@@ -68,7 +68,7 @@
       export ETCDCTL_CERT={{ rke2_data_dir }}/server/tls/etcd/server-client.crt
       export ETCDCTL_KEY={{ rke2_data_dir }}/server/tls/etcd/server-client.key
 
-      export CRI_CONFIG_FILE={{ rke2_data_dir }}/agent/etc/crictl.yaml
+      alias crictl='sudo crictl'
     create: true
 
 - name: Add kubectl & etcdctl environment to root bashrc
@@ -84,7 +84,7 @@
       export ETCDCTL_CERT={{ rke2_data_dir }}/server/tls/etcd/server-client.crt
       export ETCDCTL_KEY={{ rke2_data_dir }}/server/tls/etcd/server-client.key
 
-      export CRI_CONFIG_FILE={{ rke2_data_dir }}/agent/etc/crictl.yaml
+      alias crictl='sudo crictl'
     create: true
 
 - name: Set kubectl environment for subsequent tasks
@@ -101,16 +101,97 @@
   retries: 60
   delay: 10
 
-- name: Get cluster nodes
-  shell: kubectl get nodes
+- name: Check if etcdctl is already installed
+  stat:
+    path: /usr/local/bin/etcdctl
+  register: etcdctl_stat
+
+- name: Detect etcd version from running container
+  shell: |
+    /var/lib/rancher/rke2/bin/crictl ps --name etcd -q 2>/dev/null \
+      | head -1 \
+      | xargs -I {} /var/lib/rancher/rke2/bin/crictl exec {} etcdctl version 2>/dev/null \
+      | head -1 \
+      | awk '{print $3}'
+  register: etcd_raw_ver
+  changed_when: false
+  failed_when: false
+  when: not etcdctl_stat.stat.exists
+
+- name: Download and install etcdctl (matching cluster version)
+  unarchive:
+    src: "https://github.com/etcd-io/etcd/releases/download/v{{ etcd_raw_ver.stdout }}/etcd-v{{ etcd_raw_ver.stdout }}-linux-amd64.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
+      - --wildcards
+      - "*/etcdctl"
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - not etcdctl_stat.stat.exists
+    - etcd_raw_ver.stdout is defined
+    - etcd_raw_ver.stdout != ""
+
+- name: Copy crictl config to standard location (world-readable)
+  copy:
+    src: "{{ rke2_data_dir }}/agent/etc/crictl.yaml"
+    dest: /etc/crictl.yaml
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Verify nodes (kubectl get nodes -o wide)
+  shell: kubectl get nodes -o wide
   environment: "{{ kubectl_env }}"
-  register: kubectl_get_nodes
+  register: verify_nodes
   changed_when: false
 
-- name: Display success message and cluster nodes
+- name: Verify system pods (kubectl get pods -A)
+  shell: kubectl get pods -A
+  environment: "{{ kubectl_env }}"
+  register: verify_pods
+  changed_when: false
+
+- name: Verify etcd cluster members
+  shell: etcdctl member list
+  environment: "{{ kubectl_env }}"
+  register: verify_etcd_members
+  changed_when: false
+  failed_when: false
+
+- name: Verify etcd endpoint health
+  shell: etcdctl endpoint health -w table
+  environment: "{{ kubectl_env }}"
+  register: verify_etcd_health
+  changed_when: false
+  failed_when: false
+
+- name: Verify running containers (crictl ps)
+  shell: /var/lib/rancher/rke2/bin/crictl ps
+  register: verify_crictl
+  changed_when: false
+  failed_when: false
+
+- name: Display verification summary
   debug:
     msg:
-      - "RKE2 Control Plane installed successfully!"
+      - "✅ RKE2 Control Plane installed successfully!"
       - ""
-      - "kubectl get nodes:"
-      - "{{ kubectl_get_nodes.stdout }}"
+      - "── Nodes ──"
+      - "{{ verify_nodes.stdout }}"
+      - ""
+      - "── System Pods ──"
+      - "{{ verify_pods.stdout }}"
+      - ""
+      - "── etcd Members ──"
+      - "{{ verify_etcd_members.stdout | default('N/A - etcdctl not yet available') }}"
+      - ""
+      - "── etcd Health ──"
+      - "{{ verify_etcd_health.stdout | default('N/A') }}"
+      - ""
+      - "── Containers ──"
+      - "{{ verify_crictl.stdout | default('N/A') }}"
