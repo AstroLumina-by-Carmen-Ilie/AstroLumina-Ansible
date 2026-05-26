@@ -1,18 +1,18 @@
 ---
 # Usage:
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/rke2.yml
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/rke2.yml --tags display_variables
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/rke2.yml --tags prerequisites
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/rke2.yml --tags server
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/rke2.yml --tags agent
+#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml
+#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags display_variables
+#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags prerequisites
+#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags server
+#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags agent
 
-- name: Display all variables per host (group_vars + host_vars)
+- name: Display nodes info
   hosts: all
   gather_facts: true
-  tags: [display_variables]
+  tags: [display_variables, always]
   tasks:
     # =====================================================
-    # Display hostname information
+    # Display information
     # =====================================================
     - name: Show hostname details
       debug:
@@ -21,6 +21,7 @@
           HOST: {{ inventory_hostname }}
           ============================================
           Inventory Hostname: {{ inventory_hostname }}
+          Ansible User: {{ ansible_user }}
           Ansible Hostname: {{ ansible_hostname }}
           Primary IP: {{ ansible_host }}
           Hostname Override: {{ hostname_override | default('N/A') }}
@@ -34,7 +35,7 @@
   roles:
     - role: prerequisites
 
-- name: Install RKE2 Control Plane
+- name: Install RKE2 Control Planes
   hosts: control_planes
   become: true
   gather_facts: true

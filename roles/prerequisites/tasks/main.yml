@@ -1,58 +1,14 @@
 ---
-# Prerequisites — runs on all nodes (server + agent)
-
-# Verificam ca sistemul de operare este Linux. RKE2 nu ruleaza pe Windows/macOS.
-- name: Verify system is Linux
-  assert:
-    that: ansible_system == "Linux"
-    fail_msg: "RKE2 only supports Linux"
-
-# Incarcam modulele kernel necesare: overlay (pentru storage driver-ul containerelor)
-# si br_netfilter (pentru ca traficul intre containere sa treaca prin iptables).
-# persistent: true face ca modulele sa fie incarcate si la reboot.
-- name: Load required kernel modules
-  community.general.modprobe:
-    name: "{{ item }}"
-    state: present
-    persistent: present
-  loop:
-    - overlay
-    - br_netfilter
-
-# Configurarile de retea pentru Kubernetes:
-# bridge-nf-call-* = traficul intre containere (pe bridge) trece prin iptables,
-#   altfel regulile de NetworkPolicy nu functioneaza.
-# ip_forward = permite routing-ul intre pod-uri de pe noduri diferite.
-# ipv6 forwarding = necesar pentru dual-stack sau CNI-uri care folosesc IPv6 intern.
-- name: Set sysctl parameters for Kubernetes networking
-  ansible.posix.sysctl:
-    name: "{{ item.key }}"
-    value: "{{ item.value }}"
-    state: present
-    reload: true
-    sysctl_file: /etc/sysctl.d/99-rke2.conf
-  loop:
-    - { key: "net.bridge.bridge-nf-call-iptables",  value: "1" }
-    - { key: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
-    - { key: "net.ipv4.ip_forward",                 value: "1" }
-    - { key: "net.ipv6.conf.all.forwarding",         value: "1" }
-
-# Dezactivam swap imediat. Kubernetes nu functioneaza cu swap activ —
-# kubelet refuza sa porneasca daca swap este on.
 - name: Disable swap immediately
   command: swapoff -a
   changed_when: false
 
-# Dezactivam swap permanent — comentam liniile swap din /etc/fstab
-# ca sa nu fie reactivate la urmatorul reboot.
 - name: Disable swap permanently (fstab)
   replace:
     path: /etc/fstab
     regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
     replace: '# \1'
 
-# Oprim firewalld daca exista. RKE2 isi gestioneaza singur regulile de retea.
-# ignore_errors = nu crapa daca serviciul nu e instalat.
 - name: Disable firewalld (if present)
   service:
     name: firewalld
@@ -60,7 +16,6 @@
     enabled: false
   ignore_errors: true
 
-# Oprim ufw daca exista. Motivul e acelasi ca la firewalld.
 - name: Disable ufw (if present)
   service:
     name: ufw
@@ -68,27 +23,17 @@
     enabled: false
   ignore_errors: true
 
-# Setam hostname-ul nodului. Folosim hostname_override din host_vars
-# daca exista, altfel inventory_hostname (numele din inventar).
 - name: Set hostname
   hostname:
     name: "{{ hostname_override | default(inventory_hostname) }}"
 
-# Adaugam hostname-ul in /etc/hosts pe 127.0.1.1.
-# Unele distributii (Ubuntu) folosesc aceasta conventie in loc de 127.0.0.1
-# pentru hostname, ca sa nu interfereze cu loopback-ul real.
-- name: Ensure hostname is in /etc/hosts
+- name: Ensure cluster VMs are in /etc/hosts
   lineinfile:
     path: /etc/hosts
-    regexp: '^127\.0\.1\.1\s'
-    line: "127.0.1.1 {{ hostname_override | default(inventory_hostname) }}"
+    line: "{{ item.ip }} {{ item.hostname }}"
     state: present
+  loop: "{{ etc_hosts_entries }}"
 
-# Cream directoarele necesare pentru RKE2:
-# config_dir = unde sta config.yaml
-# data_dir = datele RKE2 (binare, etcd, etc.)
-# images_dir = imaginile containerelor (pentru airgap)
-# artifacts_remote_path = unde copiem arhivele descarcate
 - name: Create RKE2 directories
   file:
     path: "{{ item }}"
@@ -102,8 +47,6 @@
     - "{{ rke2_images_dir }}"
     - "{{ artifacts_remote_path }}"
 
-# Copiem arhivele RKE2 de pe masina locala pe nodul remote.
-# Acestea sunt binarele RKE2 si hash-urile de verificare.
 - name: Copy RKE2 artifacts to node
   copy:
     src: "{{ artifacts_local_path }}/{{ item }}"
@@ -116,7 +59,6 @@
     - "rke2-images.linux-{{ rke2_arch }}.tar.zst"
     - "sha256sum-{{ rke2_arch }}.txt"
 
-# Copiem scriptul de instalare separat — are nevoie de permisiune de executie.
 - name: Copy install.sh to node
   copy:
     src: "{{ artifacts_local_path }}/install.sh"
@@ -125,9 +67,6 @@
     group: root
     mode: "0755"
 
-# Copiem imaginea containerelor in directorul unde RKE2 o asteapta.
-# La airgap install, RKE2 nu poate descarca imagini din internet,
-# deci trebuie sa le punem manual in agent/images/.
 - name: Copy container images to images directory
   copy:
     src: "{{ artifacts_local_path }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
@@ -135,4 +74,14 @@
     owner: root
     group: root
     mode: "0644"
-    remote_src: false
+
+- name: Install zstd for image decompression
+  apt:
+    name: zstd
+    state: present
+
+- name: Pre-decompress RKE2 images for faster containerd startup
+  shell: |
+    zstd -d --rm -f "{{ rke2_images_dir }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
+  args:
+    creates: "{{ rke2_images_dir }}/rke2-images.linux-{{ rke2_arch }}.tar"

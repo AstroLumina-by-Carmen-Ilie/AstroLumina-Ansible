@@ -1,18 +1,11 @@
 ---
 # RKE2 Server (Control Plane) — installation & configuration
 
-# Verificam daca binarul RKE2 exista deja. Daca da, sarim instalarea —
-# playbook-ul e idempotent, poate fi rulat de multiple ori fara probleme.
 - name: Check if RKE2 is already installed
   stat:
     path: /usr/local/bin/rke2
   register: rke2_binary
 
-# Instalarea propriu-zisa. Folosim variabilele de mediu pentru a indica:
-#   ARTIFACT_PATH  = unde sunt arhivele downloadate (airgap, nu descarca din net)
-#   TYPE           = "server" (control plane, nu agent)
-#   VERSION        = versiunea dorita de RKE2
-# when: ruleaza doar daca binarul nu exista deja (idempotent).
 - name: Install RKE2 server from local artifacts (airgap)
   shell: |
     INSTALL_RKE2_ARTIFACT_PATH="{{ artifacts_remote_path }}" \
@@ -24,47 +17,31 @@
   when: not rke2_binary.stat.exists
   register: rke2_install_result
 
-# Afisam output-ul instalarii doar daca task-ul a facut modificari (changed).
 - name: Display installation output
   debug:
     var: rke2_install_result.stdout_lines
   when: rke2_install_result is changed
 
-# Construim dictionarul de configurare pentru RKE2 server.
-# token     = secretul shared intre server si agenti pentru join la cluster.
-# tls-san   = nume/IP-uri adaugate in certificatul TLS (ca sa nu dea eroare la conexiune).
-# cni       = plugin-ul de retea (canal = Calico + Flannel).
-# disable   = componente optionale de dezactivat (ex: rke2-ingress-nginx).
 - name: Build server configuration
   set_fact:
     rke2_server_config:
+      write-kubeconfig-mode: "0644"
       token: "{{ rke2_token }}"
       tls-san:
         - "{{ ansible_host }}"
-        - "{{ inventory_hostname }}"
-      cni: "{{ rke2_cni }}"
-      disable: "{{ rke2_disable | default([]) }}"
+        - "{{ hostname_override }}"
+      node-ip: "{{ ansible_host }}"
+      node-name: "{{ hostname_override}}"
 
-# Daca utilizatorul a definit configuratie extra in group_vars, o combinam cu cea de baza.
-# combine() suprascrie cheile comune cu valorile din extra_config.
-- name: Merge with extra configuration (if any)
-  set_fact:
-    rke2_server_config: "{{ rke2_server_config | combine(rke2_server_extra_config) }}"
-  when: rke2_server_extra_config | length > 0
-
-# Scriem config.yaml in format YAML. RKE2 citeste acest fisier la pornire.
-# Notifica handler-ul de restart daca continutul se schimba.
 - name: Write server config.yaml
   copy:
     content: "{{ rke2_server_config | to_nice_yaml(indent=2) }}"
     dest: "{{ rke2_config_dir }}/config.yaml"
     owner: root
     group: root
-    mode: "0600"
+    mode: "0644"
   notify: Restart rke2-server
 
-# Activam si pornim serviciul rke2-server.
-# daemon_reload = re-incarca systemd in caz ca unit file-ul s-a schimbat.
 - name: Enable and start rke2-server
   systemd:
     name: rke2-server
@@ -72,58 +49,55 @@
     enabled: true
     daemon_reload: true
 
-# Asteptam ca portul API server (6443) sa asculte.
-# timeout: 300s (5 minute), delay: 15s intre incercari.
 - name: Wait for rke2-server to be active (max 5 min)
   wait_for:
     host: "{{ ansible_host }}"
     port: "{{ rke2_api_port }}"
     timeout: 300
-    delay: 15
+    delay: 30
 
-# Verificam ca nodul e in starea Ready folosind kubectl.
-# Interogam conditia Ready din status-ul nodului curent.
-# retries: 20, delay: 15s = maxim ~5 minute de asteptare.
+- name: Add kubectl environment to user bashrc
+  blockinfile:
+    path: /home/resu/.bashrc
+    marker: "# {mark} ANSIBLE MANAGED - RKE2 kubectl"
+    block: |
+      export KUBECONFIG={{ rke2_kubeconfig_path }}
+      export PATH={{ rke2_kubectl_bin_dir }}:$PATH
+    create: true
+
+- name: Add kubectl environment to root bashrc
+  blockinfile:
+    path: /root/.bashrc
+    marker: "# {mark} ANSIBLE MANAGED - RKE2 kubectl"
+    block: |
+      export KUBECONFIG={{ rke2_kubeconfig_path }}
+      export PATH={{ rke2_kubectl_bin_dir }}:$PATH
+    create: true
+
+- name: Set kubectl environment for subsequent tasks
+  set_fact:
+    kubectl_env:
+      KUBECONFIG: "{{ rke2_kubeconfig_path }}"
+      PATH: "{{ rke2_kubectl_bin_dir }}:{{ ansible_env.PATH }}"
+
 - name: Wait for node to be Ready
-  shell: |
-    /var/lib/rancher/rke2/bin/kubectl \
-      --kubeconfig /etc/rancher/rke2/rke2.yaml \
-      get nodes {{ inventory_hostname }} \
-      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  shell: kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  environment: "{{ kubectl_env }}"
   register: node_ready
-  until: node_ready.stdout == "True"
-  retries: 20
-  delay: 15
+  until: node_ready.stdout == "True" and node_ready.rc == 0
+  retries: 60
+  delay: 10
+
+- name: Get cluster nodes
+  shell: kubectl get nodes
+  environment: "{{ kubectl_env }}"
+  register: kubectl_get_nodes
   changed_when: false
 
-# Citim kubeconfig-ul de pe server (contine certificate si endpoint-ul API).
-# slurp = citeste fisierul remote si il returneaza base64-encoded.
-- name: Read kubeconfig from server
-  slurp:
-    src: /etc/rancher/rke2/rke2.yaml
-  register: rke2_kubeconfig_raw
-
-# Salvam kubeconfig-ul local, inlocuind 127.0.0.1/localhost cu IP-ul real al serverului.
-# delegate_to: localhost = ruleaza pe masina ta, nu pe nodul remote.
-# become: false = nu folosi sudo (scrie in directorul curent al userului).
-- name: Save kubeconfig locally (with correct IP)
-  copy:
-    content: >-
-      {{
-        rke2_kubeconfig_raw.content
-        | b64decode
-        | replace('127.0.0.1', ansible_host)
-        | replace('localhost', ansible_host)
-      }}
-    dest: "./rke2-kubeconfig.yaml"
-    mode: "0600"
-  delegate_to: localhost
-  become: false
-
-- name: Display success message
+- name: Display success message and cluster nodes
   debug:
     msg:
       - "RKE2 Control Plane installed successfully!"
-      - "   Kubeconfig saved locally: ./rke2-kubeconfig.yaml"
-      - "   Export: export KUBECONFIG=$(pwd)/rke2-kubeconfig.yaml"
-      - "   Test: kubectl get nodes"
+      - ""
+      - "kubectl get nodes:"
+      - "{{ kubectl_get_nodes.stdout }}"

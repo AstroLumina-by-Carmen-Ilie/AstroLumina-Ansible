@@ -1,7 +1,6 @@
 ---
-# Playbook: Gather Hostnames
-# Purpose: Collect hostname and variable information from all hosts
-# Usage: ansible-playbook playbooks/gather_hostnames.yml
+# Usage:
+#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/check_connectivity.yml
 
 - name: Display all variables per host (group_vars + host_vars)
   hosts: all
@@ -18,22 +17,13 @@
           ============================================
           Ansible Hostname: {{ ansible_hostname }}
           Primary IP: {{ ansible_host }}
-
-    # =====================================================
-    # Display group_vars (all)
-    # =====================================================
-    - name: Display group_vars (all) - cluster settings
-      debug:
-        msg: |
-          Cluster Name: {{ cluster_name }}
-          Environment: {{ environment}}
           RKE2 Role: {{ rke2_role }}
 
 - name: Call display_variable role with different custom_message per group
-  hosts: control_plane
+  hosts: control_planes
   gather_facts: false
   vars:
-    custom_message: "Message from control_plane group"
+    custom_message: "Message from control_planes group"
   roles:
     - display_variable
 

@@ -9,3 +9,5 @@ all:
       hosts:
         rke2-worker-01:
           ansible_host: 192.168.122.11
+        rke2-worker-02:
+          ansible_host: 192.168.122.12

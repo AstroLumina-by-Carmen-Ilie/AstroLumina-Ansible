@@ -1,14 +1,11 @@
 ---
 # RKE2 Agent (Worker) — installation & configuration
 
-# Verificam daca binarul RKE2 exista deja (idempotent — sarim daca e deja instalat).
 - name: Check if RKE2 is already installed
   stat:
     path: /usr/local/bin/rke2
   register: rke2_binary
 
-# Instalarea agentului. Similar cu server-ul, dar TYPE="agent".
-# Artefactele locale sunt folosite in loc de download din internet (airgap).
 - name: Install RKE2 agent from local artifacts (airgap)
   shell: |
     INSTALL_RKE2_ARTIFACT_PATH="{{ artifacts_remote_path }}" \
@@ -20,38 +17,28 @@
   when: not rke2_binary.stat.exists
   register: rke2_install_result
 
-# Afisam output-ul doar daca instalarea a avut loc (changed).
 - name: Display installation output
   debug:
     var: rke2_install_result.stdout_lines
   when: rke2_install_result is changed
 
-# Configurarea agentului:
-# server = adresa serverului RKE2 (port 9345 = portul de join pentru agenti).
-# token  = secretul shared care autorizeaza agentul sa se conecteze la cluster.
 - name: Build agent configuration
   set_fact:
     rke2_agent_config:
       server: "https://{{ rke2_server_ip }}:9345"
       token: "{{ rke2_token }}"
+      node-ip: "{{ ansible_host }}"
+      node-name: "{{ hostname_override}}"
 
-# Combinam cu orice configuratie extra definita in group_vars.
-- name: Merge with extra configuration (if any)
-  set_fact:
-    rke2_agent_config: "{{ rke2_agent_config | combine(rke2_agent_extra_config) }}"
-  when: rke2_agent_extra_config | length > 0
-
-# Scriem config.yaml pentru agent. RKE2 agentul citeste acest fisier la pornire.
 - name: Write agent config.yaml
   copy:
     content: "{{ rke2_agent_config | to_nice_yaml(indent=2) }}"
     dest: "{{ rke2_config_dir }}/config.yaml"
     owner: root
     group: root
-    mode: "0600"
+    mode: "0644"
   notify: Restart rke2-agent
 
-# Activam si pornim serviciul rke2-agent.
 - name: Enable and start rke2-agent
   systemd:
     name: rke2-agent
@@ -59,22 +46,39 @@
     enabled: true
     daemon_reload: true
 
-# Verificam ca worker-ul s-a alaturat clusterului si e Ready.
-# delegate_to: control_plane = verificarea ruleaza pe server, nu pe worker,
-# pentru ca doar server-ul are kubectl configurat.
+- name: Set kubectl environment for subsequent tasks
+  set_fact:
+    kubectl_env:
+      KUBECONFIG: "{{ rke2_kubeconfig_path }}"
+      PATH: "{{ rke2_kubectl_bin_dir }}:{{ hostvars[groups['control_planes'][0]].ansible_env.PATH }}"
+
 - name: Wait for worker to be Ready (verified from control-plane)
-  shell: |
-    /var/lib/rancher/rke2/bin/kubectl \
-      --kubeconfig /etc/rancher/rke2/rke2.yaml \
-      get nodes {{ inventory_hostname }} \
-      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  shell: kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  environment: "{{ kubectl_env }}"
   register: worker_ready
   until: worker_ready.stdout == "True"
   retries: 20
   delay: 15
   changed_when: false
-  delegate_to: "{{ groups['control_plane'][0] }}"
+  delegate_to: "{{ groups['control_planes'][0] }}"
 
-- name: Display success message
+- name: Label worker node (verified from control-plane)
+  shell: kubectl label node {{ hostname_override }} node-role.kubernetes.io/worker=worker --overwrite
+  environment: "{{ kubectl_env }}"
+  changed_when: false
+  delegate_to: "{{ groups['control_planes'][0] }}"
+
+- name: Get cluster nodes from control plane
+  shell: kubectl get nodes
+  environment: "{{ kubectl_env }}"
+  register: kubectl_get_nodes
+  changed_when: false
+  delegate_to: "{{ groups['control_planes'][0] }}"
+
+- name: Display success message and cluster nodes
   debug:
-    msg: "Worker {{ inventory_hostname }} joined the cluster successfully!"
+    msg:
+      - "Worker {{ inventory_hostname }} joined the cluster successfully!"
+      - ""
+      - "kubectl get nodes:"
+      - "{{ kubectl_get_nodes.stdout }}"
