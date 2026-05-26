@@ -46,10 +46,6 @@
     state: started
     enabled: true
     daemon_reload: true
-  register: rke2_service
-  retries: 5
-  delay: 10
-  until: rke2_service is success
 
 - name: Wait for rke2-server to be active (max 5 min)
   wait_for:

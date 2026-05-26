@@ -43,10 +43,6 @@
     state: started
     enabled: true
     daemon_reload: true
-  register: rke2_service
-  retries: 5
-  delay: 10
-  until: rke2_service is success
 
 - name: Wait for worker to be Ready (verified from control-plane)
   shell: |
@@ -108,15 +104,3 @@
       - ""
       - "── Nodes ──"
       - "{{ verify_nodes.stdout }}"
-      - ""
-      - "── System Pods ──"
-      - "{{ verify_pods.stdout }}"
-      - ""
-      - "── etcd Members ──"
-      - "{{ verify_etcd_members.stdout | default('N/A') }}"
-      - ""
-      - "── etcd Health ──"
-      - "{{ verify_etcd_health.stdout | default('N/A') }}"
-      - ""
-      - "── Containers ──"
-      - "{{ verify_crictl.stdout | default('N/A') }}"
