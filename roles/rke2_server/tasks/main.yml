@@ -49,29 +49,43 @@
     enabled: true
     daemon_reload: true
 
-- name: Wait for rke2-server to be active (max 10 min)
+- name: Wait for rke2-server to be active (max 5 min)
   wait_for:
     host: "{{ ansible_host }}"
     port: "{{ rke2_api_port }}"
-    timeout: 600
-    delay: 30
+    timeout: 300
+    delay: 60
 
-- name: Add kubectl environment to user bashrc
+- name: Add kubectl & etcdctl environment to ubuntu bashrc
   blockinfile:
     path: /home/ubuntu/.bashrc
-    marker: "# {mark} ANSIBLE MANAGED - RKE2 kubectl"
+    marker: "# {mark} ANSIBLE MANAGED - RKE2 tools"
     block: |
       export KUBECONFIG={{ rke2_kubeconfig_path }}
       export PATH={{ rke2_kubectl_bin_dir }}:$PATH
+
+      export ETCDCTL_ENDPOINTS=https://127.0.0.1:2379
+      export ETCDCTL_CACERT={{ rke2_data_dir }}/server/tls/etcd/server-ca.crt
+      export ETCDCTL_CERT={{ rke2_data_dir }}/server/tls/etcd/server-client.crt
+      export ETCDCTL_KEY={{ rke2_data_dir }}/server/tls/etcd/server-client.key
+
+      export CRI_CONFIG_FILE={{ rke2_data_dir }}/agent/etc/crictl.yaml
     create: true
 
-- name: Add kubectl environment to root bashrc
+- name: Add kubectl & etcdctl environment to root bashrc
   blockinfile:
     path: /root/.bashrc
-    marker: "# {mark} ANSIBLE MANAGED - RKE2 kubectl"
+    marker: "# {mark} ANSIBLE MANAGED - RKE2 tools"
     block: |
       export KUBECONFIG={{ rke2_kubeconfig_path }}
       export PATH={{ rke2_kubectl_bin_dir }}:$PATH
+
+      export ETCDCTL_ENDPOINTS=https://127.0.0.1:2379
+      export ETCDCTL_CACERT={{ rke2_data_dir }}/server/tls/etcd/server-ca.crt
+      export ETCDCTL_CERT={{ rke2_data_dir }}/server/tls/etcd/server-client.crt
+      export ETCDCTL_KEY={{ rke2_data_dir }}/server/tls/etcd/server-client.key
+
+      export CRI_CONFIG_FILE={{ rke2_data_dir }}/agent/etc/crictl.yaml
     create: true
 
 - name: Set kubectl environment for subsequent tasks
