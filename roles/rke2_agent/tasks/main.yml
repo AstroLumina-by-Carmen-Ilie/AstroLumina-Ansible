@@ -45,77 +45,57 @@
     enabled: true
     daemon_reload: true
 
-- name: Set kubectl environment for subsequent tasks
-  set_fact:
-    kubectl_env:
-      KUBECONFIG: "{{ rke2_kubeconfig_path }}"
-      PATH: "{{ rke2_kubectl_bin_dir }}:{{ hostvars[groups['control_planes'][0]].ansible_env.PATH }}"
-      CRI_CONFIG_FILE: "{{ rke2_data_dir }}/agent/etc/crictl.yaml"
-      ETCDCTL_CACERT: "{{ rke2_data_dir }}/server/tls/etcd/server-ca.crt"
-      ETCDCTL_CERT: "{{ rke2_data_dir }}/server/tls/etcd/server-client.crt"
-      ETCDCTL_KEY: "{{ rke2_data_dir }}/server/tls/etcd/server-client.key"
-
 - name: Wait for worker to be Ready (verified from control-plane)
-  shell: kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-  environment: "{{ kubectl_env }}"
+  shell: |
+    . ~/.bashrc
+    kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
   register: worker_ready
-  until: worker_ready.stdout == "True"
+  until: worker_ready.stdout | trim == "True"
   retries: 20
   delay: 15
-  changed_when: false
   delegate_to: "{{ groups['control_planes'][0] }}"
 
 - name: Label worker node (verified from control-plane)
-  shell: kubectl label node {{ hostname_override }} node-role.kubernetes.io/worker=worker --overwrite
-  environment: "{{ kubectl_env }}"
-  changed_when: false
+  shell: |
+    . ~/.bashrc
+    kubectl label node {{ hostname_override }} node-role.kubernetes.io/worker=worker --overwrite
   delegate_to: "{{ groups['control_planes'][0] }}"
 
 - name: Verify nodes (kubectl get nodes -o wide)
-  shell: kubectl get nodes -o wide
-  environment: "{{ kubectl_env }}"
+  shell: |
+    . ~/.bashrc
+    kubectl get nodes -o wide
   register: verify_nodes
-  changed_when: false
   delegate_to: "{{ groups['control_planes'][0] }}"
 
 - name: Verify system pods (kubectl get pods -A)
-  shell: kubectl get pods -A
-  environment: "{{ kubectl_env }}"
+  shell: |
+    . ~/.bashrc
+    kubectl get pods -A
   register: verify_pods
-  changed_when: false
+  delegate_to: "{{ groups['control_planes'][0] }}"
+
+- name: Verify running containers (crictl ps)
+  shell: |
+    . ~/.bashrc
+    crictl ps
+  register: verify_crictl
   delegate_to: "{{ groups['control_planes'][0] }}"
 
 - name: Verify etcd cluster members
   shell: |
-    ETCD_CTR=$(crictl ps --label io.kubernetes.container.name=etcd -q --latest 2>/dev/null | head -1)
-    if [ -n "$ETCD_CTR" ]; then
-      crictl exec "$ETCD_CTR" etcdctl member list
-    else
-      echo "etcd container not found"
-    fi
-  environment: "{{ kubectl_env }}"
+    . ~/.bashrc
+    etcdctl member list -w table --dial-timeout=5s
   register: verify_etcd_members
-  changed_when: false
+  ignore_errors: true
   delegate_to: "{{ groups['control_planes'][0] }}"
 
 - name: Verify etcd endpoint health
   shell: |
-    ETCD_CTR=$(crictl ps --label io.kubernetes.container.name=etcd -q --latest 2>/dev/null | head -1)
-    if [ -n "$ETCD_CTR" ]; then
-      crictl exec "$ETCD_CTR" etcdctl endpoint health -w table
-    else
-      echo "etcd container not found"
-    fi
-  environment: "{{ kubectl_env }}"
+    . ~/.bashrc
+    etcdctl endpoint health -w table --dial-timeout=5s
   register: verify_etcd_health
-  changed_when: false
-  delegate_to: "{{ groups['control_planes'][0] }}"
-
-- name: Verify running containers (crictl ps)
-  shell: crictl ps
-  environment: "{{ kubectl_env }}"
-  register: verify_crictl
-  changed_when: false
+  ignore_errors: true
   delegate_to: "{{ groups['control_planes'][0] }}"
 
 - name: Display verification summary

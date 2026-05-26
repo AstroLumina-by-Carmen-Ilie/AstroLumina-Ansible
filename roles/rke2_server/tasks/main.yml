@@ -55,7 +55,7 @@
     timeout: 300
     delay: 60
 
-- name: Add kubectl & etcdctl environment to ubuntu bashrc
+- name: Configure .bashrc
   blockinfile:
     path: "{{ item }}"
     marker: "# {mark} ANSIBLE MANAGED - RKE2 tools"
@@ -63,80 +63,72 @@
       export KUBECONFIG={{ rke2_kubeconfig_path }}
       export PATH={{ rke2_kubectl_bin_dir }}:$PATH
 
-      export CRI_CONFIG_FILE={{ rke2_data_dir }}/agent/etc/crictl.yaml
-      alias crictl="sudo /var/lib/rancher/rke2/bin/crictl"
+      crictl() {
+        sudo /var/lib/rancher/rke2/bin/crictl \
+          --config={{ rke2_data_dir }}/agent/etc/crictl.yaml "$@"
+      }
 
-      export ETCDCTL_CACERT={{ rke2_data_dir }}/server/tls/etcd/server-ca.crt
-      export ETCDCTL_CERT={{ rke2_data_dir }}/server/tls/etcd/server-client.crt
-      export ETCDCTL_KEY={{ rke2_data_dir }}/server/tls/etcd/server-client.key
-
-      etcdcontainer=$(crictl ps --label io.kubernetes.container.name=etcd --quiet)
-      alias etcdctl="crictl exec $etcdcontainer etcdctl \
-        --cert $ETCDCTL_CERT --key $ETCDCTL_KEY -cacert $ETCDCTL_CACERT"
+      etcdctl() {
+        local container
+        container=$(sudo /var/lib/rancher/rke2/bin/crictl \
+          --config={{ rke2_data_dir }}/agent/etc/crictl.yaml \
+          ps --label io.kubernetes.container.name=etcd --quiet --latest 2>/dev/null | head -1)
+        if [ -z "$container" ]; then
+          echo "etcd container not found" >&2
+          return 1
+        fi
+        sudo /var/lib/rancher/rke2/bin/crictl \
+          --config={{ rke2_data_dir }}/agent/etc/crictl.yaml \
+          exec "$container" etcdctl \
+          --cert {{ rke2_data_dir }}/server/tls/etcd/server-client.crt \
+          --key {{ rke2_data_dir }}/server/tls/etcd/server-client.key \
+          --cacert {{ rke2_data_dir }}/server/tls/etcd/server-ca.crt "$@"
+      }
     create: true
   loop:
-    - "/home/ubuntu/.bashrc"
-    - "/root/.bashrc"
-
-- name: Set kubectl environment for subsequent tasks
-  set_fact:
-    kubectl_env:
-      KUBECONFIG: "{{ rke2_kubeconfig_path }}"
-      PATH: "{{ rke2_kubectl_bin_dir }}:{{ ansible_env.PATH }}"
-      CRI_CONFIG_FILE: "{{ rke2_data_dir }}/agent/etc/crictl.yaml"
-      ETCDCTL_CACERT: "{{ rke2_data_dir }}/server/tls/etcd/server-ca.crt"
-      ETCDCTL_CERT: "{{ rke2_data_dir }}/server/tls/etcd/server-client.crt"
-      ETCDCTL_KEY: "{{ rke2_data_dir }}/server/tls/etcd/server-client.key"
+    - /root/.bashrc
+    - /home/ubuntu/.bashrc
 
 - name: Wait for node to be Ready
-  shell: kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-  environment: "{{ kubectl_env }}"
+  shell: |
+    . ~/.bashrc
+    kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
   register: node_ready
-  until: node_ready.stdout == "True" and node_ready.rc == 0
+  until: node_ready.stdout | trim == "True"
   retries: 60
   delay: 10
 
 - name: Verify nodes (kubectl get nodes -o wide)
-  shell: kubectl get nodes -o wide
-  environment: "{{ kubectl_env }}"
+  shell: |
+    . ~/.bashrc
+    kubectl get nodes -o wide
   register: verify_nodes
-  changed_when: false
 
 - name: Verify system pods (kubectl get pods -A)
-  shell: kubectl get pods -A
-  environment: "{{ kubectl_env }}"
+  shell: |
+    . ~/.bashrc
+    kubectl get pods -A
   register: verify_pods
-  changed_when: false
+
+- name: Verify running containers (crictl ps)
+  shell: |
+    . ~/.bashrc
+    crictl ps
+  register: verify_crictl
 
 - name: Verify etcd cluster members
   shell: |
-    ETCD_CTR=$(crictl ps --label io.kubernetes.container.name=etcd -q --latest 2>/dev/null | head -1)
-    if [ -n "$ETCD_CTR" ]; then
-      crictl exec "$ETCD_CTR" etcdctl member list
-    else
-      echo "etcd container not found"
-    fi
-  environment: "{{ kubectl_env }}"
+    . ~/.bashrc
+    etcdctl member list -w table --dial-timeout=5s
   register: verify_etcd_members
-  changed_when: false
+  ignore_errors: true
 
 - name: Verify etcd endpoint health
   shell: |
-    ETCD_CTR=$(crictl ps --label io.kubernetes.container.name=etcd -q --latest 2>/dev/null | head -1)
-    if [ -n "$ETCD_CTR" ]; then
-      crictl exec "$ETCD_CTR" etcdctl endpoint health -w table
-    else
-      echo "etcd container not found"
-    fi
-  environment: "{{ kubectl_env }}"
+    . ~/.bashrc
+    etcdctl endpoint health -w table --dial-timeout=5s
   register: verify_etcd_health
-  changed_when: false
-
-- name: Verify running containers (crictl ps)
-  shell: crictl ps
-  environment: "{{ kubectl_env }}"
-  register: verify_crictl
-  changed_when: false
+  ignore_errors: true
 
 - name: Display verification summary
   debug:
