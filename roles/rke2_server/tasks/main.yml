@@ -57,41 +57,36 @@
 
 - name: Add kubectl & etcdctl environment to ubuntu bashrc
   blockinfile:
-    path: /home/ubuntu/.bashrc
+    path: "{{ item }}"
     marker: "# {mark} ANSIBLE MANAGED - RKE2 tools"
     block: |
       export KUBECONFIG={{ rke2_kubeconfig_path }}
       export PATH={{ rke2_kubectl_bin_dir }}:$PATH
 
-      export ETCDCTL_ENDPOINTS=https://127.0.0.1:2379
+      export CRI_CONFIG_FILE={{ rke2_data_dir }}/agent/etc/crictl.yaml
+      alias crictl="sudo /var/lib/rancher/rke2/bin/crictl"
+
       export ETCDCTL_CACERT={{ rke2_data_dir }}/server/tls/etcd/server-ca.crt
       export ETCDCTL_CERT={{ rke2_data_dir }}/server/tls/etcd/server-client.crt
       export ETCDCTL_KEY={{ rke2_data_dir }}/server/tls/etcd/server-client.key
 
-      alias crictl='sudo crictl'
+      etcdcontainer=$(crictl ps --label io.kubernetes.container.name=etcd --quiet)
+      alias etcdctl="crictl exec $etcdcontainer etcdctl \
+        --cert $ETCDCTL_CERT --key $ETCDCTL_KEY -cacert $ETCDCTL_CACERT"
     create: true
-
-- name: Add kubectl & etcdctl environment to root bashrc
-  blockinfile:
-    path: /root/.bashrc
-    marker: "# {mark} ANSIBLE MANAGED - RKE2 tools"
-    block: |
-      export KUBECONFIG={{ rke2_kubeconfig_path }}
-      export PATH={{ rke2_kubectl_bin_dir }}:$PATH
-
-      export ETCDCTL_ENDPOINTS=https://127.0.0.1:2379
-      export ETCDCTL_CACERT={{ rke2_data_dir }}/server/tls/etcd/server-ca.crt
-      export ETCDCTL_CERT={{ rke2_data_dir }}/server/tls/etcd/server-client.crt
-      export ETCDCTL_KEY={{ rke2_data_dir }}/server/tls/etcd/server-client.key
-
-      alias crictl='sudo crictl'
-    create: true
+  loop:
+    - "/home/ubuntu/.bashrc"
+    - "/root/.bashrc"
 
 - name: Set kubectl environment for subsequent tasks
   set_fact:
     kubectl_env:
       KUBECONFIG: "{{ rke2_kubeconfig_path }}"
       PATH: "{{ rke2_kubectl_bin_dir }}:{{ ansible_env.PATH }}"
+      CRI_CONFIG_FILE: "{{ rke2_data_dir }}/agent/etc/crictl.yaml"
+      ETCDCTL_CACERT: "{{ rke2_data_dir }}/server/tls/etcd/server-ca.crt"
+      ETCDCTL_CERT: "{{ rke2_data_dir }}/server/tls/etcd/server-client.crt"
+      ETCDCTL_KEY: "{{ rke2_data_dir }}/server/tls/etcd/server-client.key"
 
 - name: Wait for node to be Ready
   shell: kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
@@ -100,49 +95,6 @@
   until: node_ready.stdout == "True" and node_ready.rc == 0
   retries: 60
   delay: 10
-
-- name: Check if etcdctl is already installed
-  stat:
-    path: /usr/local/bin/etcdctl
-  register: etcdctl_stat
-
-- name: Detect etcd version from running container
-  shell: |
-    /var/lib/rancher/rke2/bin/crictl ps --name etcd -q 2>/dev/null \
-      | head -1 \
-      | xargs -I {} /var/lib/rancher/rke2/bin/crictl exec {} etcdctl version 2>/dev/null \
-      | head -1 \
-      | awk '{print $3}'
-  register: etcd_raw_ver
-  changed_when: false
-  failed_when: false
-  when: not etcdctl_stat.stat.exists
-
-- name: Download and install etcdctl (matching cluster version)
-  unarchive:
-    src: "https://github.com/etcd-io/etcd/releases/download/v{{ etcd_raw_ver.stdout }}/etcd-v{{ etcd_raw_ver.stdout }}-linux-amd64.tar.gz"
-    dest: /usr/local/bin
-    remote_src: true
-    extra_opts:
-      - --strip-components=1
-      - --wildcards
-      - "*/etcdctl"
-    owner: root
-    group: root
-    mode: "0755"
-  when:
-    - not etcdctl_stat.stat.exists
-    - etcd_raw_ver.stdout is defined
-    - etcd_raw_ver.stdout != ""
-
-- name: Copy crictl config to standard location (world-readable)
-  copy:
-    src: "{{ rke2_data_dir }}/agent/etc/crictl.yaml"
-    dest: /etc/crictl.yaml
-    remote_src: true
-    owner: root
-    group: root
-    mode: "0644"
 
 - name: Verify nodes (kubectl get nodes -o wide)
   shell: kubectl get nodes -o wide
@@ -157,24 +109,34 @@
   changed_when: false
 
 - name: Verify etcd cluster members
-  shell: etcdctl member list
+  shell: |
+    ETCD_CTR=$(crictl ps --label io.kubernetes.container.name=etcd -q --latest 2>/dev/null | head -1)
+    if [ -n "$ETCD_CTR" ]; then
+      crictl exec "$ETCD_CTR" etcdctl member list
+    else
+      echo "etcd container not found"
+    fi
   environment: "{{ kubectl_env }}"
   register: verify_etcd_members
   changed_when: false
-  failed_when: false
 
 - name: Verify etcd endpoint health
-  shell: etcdctl endpoint health -w table
+  shell: |
+    ETCD_CTR=$(crictl ps --label io.kubernetes.container.name=etcd -q --latest 2>/dev/null | head -1)
+    if [ -n "$ETCD_CTR" ]; then
+      crictl exec "$ETCD_CTR" etcdctl endpoint health -w table
+    else
+      echo "etcd container not found"
+    fi
   environment: "{{ kubectl_env }}"
   register: verify_etcd_health
   changed_when: false
-  failed_when: false
 
 - name: Verify running containers (crictl ps)
-  shell: /var/lib/rancher/rke2/bin/crictl ps
+  shell: crictl ps
+  environment: "{{ kubectl_env }}"
   register: verify_crictl
   changed_when: false
-  failed_when: false
 
 - name: Display verification summary
   debug:
@@ -188,7 +150,7 @@
       - "{{ verify_pods.stdout }}"
       - ""
       - "── etcd Members ──"
-      - "{{ verify_etcd_members.stdout | default('N/A - etcdctl not yet available') }}"
+      - "{{ verify_etcd_members.stdout | default('N/A') }}"
       - ""
       - "── etcd Health ──"
       - "{{ verify_etcd_health.stdout | default('N/A') }}"
