@@ -1,6 +1,6 @@
 ---
 # Usage:
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/check_connectivity.yml
+#   ansible-playbook playbooks/check_connectivity.yml
 
 - name: Display all variables per host (group_vars + host_vars)
   hosts: all

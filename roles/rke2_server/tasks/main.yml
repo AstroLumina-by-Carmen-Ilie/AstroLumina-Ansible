@@ -49,16 +49,16 @@
     enabled: true
     daemon_reload: true
 
-- name: Wait for rke2-server to be active (max 5 min)
+- name: Wait for rke2-server to be active (max 10 min)
   wait_for:
     host: "{{ ansible_host }}"
     port: "{{ rke2_api_port }}"
-    timeout: 300
+    timeout: 600
     delay: 30
 
 - name: Add kubectl environment to user bashrc
   blockinfile:
-    path: /home/resu/.bashrc
+    path: /home/ubuntu/.bashrc
     marker: "# {mark} ANSIBLE MANAGED - RKE2 kubectl"
     block: |
       export KUBECONFIG={{ rke2_kubeconfig_path }}

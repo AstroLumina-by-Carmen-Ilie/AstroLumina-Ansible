@@ -1,6 +1,3 @@
 ---
 # Host-specific variables for rke2-worker-01
 hostname_override: "{{ rke2_worker_01_hostname }}"
-
-rke2_worker_01_hostname: "rke2-worker-{{ p_name }}-01"
-rke2_worker_01_ip: "192.168.122.11"

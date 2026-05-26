@@ -33,7 +33,7 @@ The inventory defines the RKE2 cluster nodes:
 
 ### Groups
 
-- `control_plane` - RKE2 server nodes
+- `control_planes` - RKE2 server nodes
 - `workers` - RKE2 agent nodes
 - `all` - All nodes (combined)
 

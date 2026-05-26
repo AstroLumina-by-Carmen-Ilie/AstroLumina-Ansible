@@ -7,6 +7,13 @@ environment: production
 p_name: daniel-pirvu
 p_cidr: 192.168.122.0/24
 
+rke2_cp_01_hostname: "rke2-cp-{{ p_name }}-01"
+rke2_cp_01_ip: "192.168.122.10"
+rke2_worker_01_hostname: "rke2-worker-{{ p_name }}-01"
+rke2_worker_01_ip: "192.168.122.11"
+rke2_worker_02_hostname: "rke2-worker-{{ p_name }}-02"
+rke2_worker_02_ip: "192.168.122.12"
+
 etc_hosts_entries:
   - ip: "127.0.0.1"
     hostname: "{{ hostname_override | default(inventory_hostname) }}"

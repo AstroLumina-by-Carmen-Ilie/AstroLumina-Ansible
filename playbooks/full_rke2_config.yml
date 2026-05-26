@@ -1,10 +1,10 @@
 ---
 # Usage:
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags display_variables
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags prerequisites
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags server
-#   ANSIBLE_CONFIG=./ansible.cfg ansible-playbook playbooks/full_rke2_config.yml --tags agent
+#   ansible-playbook playbooks/full_rke2_config.yml
+#   ansible-playbook playbooks/full_rke2_config.yml --tags display_variables
+#   ansible-playbook playbooks/full_rke2_config.yml --tags prerequisites
+#   ansible-playbook playbooks/full_rke2_config.yml --tags server
+#   ansible-playbook playbooks/full_rke2_config.yml --tags agent
 
 - name: Display nodes info
   hosts: all

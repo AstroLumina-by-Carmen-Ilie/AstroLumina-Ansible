@@ -1,7 +1,7 @@
 ---
 all:
   children:
-    control_plane:
+    control_planes:
       hosts:
         rke2-cp-01:
           ansible_host: 192.168.122.10
