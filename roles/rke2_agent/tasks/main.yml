@@ -1,9 +1,5 @@
 ---
 # RKE2 Agent (Worker) — installation & configuration
-- name: Wait for system to be fully booted
-  pause:
-    seconds: 30
-
 - name: Check if RKE2 is already installed
   stat:
     path: /usr/local/bin/rke2
@@ -31,7 +27,7 @@
       server: "https://{{ rke2_server_ip }}:9345"
       token: "{{ rke2_token }}"
       node-ip: "{{ ansible_host }}"
-      node-name: "{{ hostname_override}}"
+      node-name: "{{ hostname_override }}"
 
 - name: Write agent config.yaml
   copy:
@@ -41,12 +37,16 @@
     group: root
     mode: "0644"
 
-- name: Enable and start rke2-agent
+- name: Enable and start rke2-agent (with retry for D-Bus race)
   systemd:
     name: rke2-agent
     state: started
     enabled: true
     daemon_reload: true
+  register: rke2_service
+  retries: 5
+  delay: 10
+  until: rke2_service is success
 
 - name: Wait for worker to be Ready (verified from control-plane)
   shell: |

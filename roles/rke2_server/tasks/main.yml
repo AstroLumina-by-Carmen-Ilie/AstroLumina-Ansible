@@ -1,9 +1,5 @@
 ---
 # RKE2 Server (Control Plane) — installation & configuration
-- name: Wait for system to be fully booted
-  pause:
-    seconds: 30
-
 - name: Check if RKE2 is already installed
   stat:
     path: /usr/local/bin/rke2
@@ -34,7 +30,7 @@
         - "{{ ansible_host }}"
         - "{{ hostname_override }}"
       node-ip: "{{ ansible_host }}"
-      node-name: "{{ hostname_override}}"
+      node-name: "{{ hostname_override }}"
 
 - name: Write server config.yaml
   copy:
@@ -44,12 +40,16 @@
     group: root
     mode: "0644"
 
-- name: Enable and start rke2-server
+- name: Enable and start rke2-server (with retry for D-Bus race)
   systemd:
     name: rke2-server
     state: started
     enabled: true
     daemon_reload: true
+  register: rke2_service
+  retries: 5
+  delay: 10
+  until: rke2_service is success
 
 - name: Wait for rke2-server to be active (max 5 min)
   wait_for:

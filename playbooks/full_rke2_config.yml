@@ -6,6 +6,25 @@
 #   ansible-playbook playbooks/full_rke2_config.yml --tags server
 #   ansible-playbook playbooks/full_rke2_config.yml --tags agent
 
+- name: Display all variables per host (group_vars + host_vars)
+  hosts: all
+  gather_facts: false
+  tasks:
+    # =====================================================
+    # Wait for the hosts to become reachable
+    # =====================================================
+    - name: Wait for hosts to become reachable
+      wait_for_connection:
+
+    - name: Wait for cloud-init to complete
+      shell: cloud-init status
+      register: ci_status
+      changed_when: false
+      failed_when: false
+      until: "'done' in ci_status.stdout"
+      retries: 60
+      delay: 10
+
 - name: Display nodes info
   hosts: all
   gather_facts: true
