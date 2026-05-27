@@ -1,0 +1,5 @@
+##
+/rke2-artifacts
+
+# Personal configuration (contains tokens, IPs) — use config/local.yml.example as template
+/config/local.yml

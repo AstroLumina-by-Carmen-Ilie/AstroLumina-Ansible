@@ -1,0 +1,6 @@
+---
+- name: Restart rke2-server
+  systemd:
+    name: rke2-server
+    state: restarted
+    daemon_reload: true

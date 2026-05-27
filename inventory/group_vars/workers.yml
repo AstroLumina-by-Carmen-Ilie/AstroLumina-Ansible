@@ -1,0 +1,4 @@
+---
+# Variables for workers group (RKE2 agents)
+
+rke2_role: agent

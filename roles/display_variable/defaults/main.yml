@@ -1,0 +1,4 @@
+---
+# Default variables for display_variable role
+
+custom_message: "Default message from role"

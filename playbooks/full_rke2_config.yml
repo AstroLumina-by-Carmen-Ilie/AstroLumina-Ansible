@@ -1,0 +1,72 @@
+---
+# Usage:
+#   ansible-playbook playbooks/full_rke2_config.yml
+#   ansible-playbook playbooks/full_rke2_config.yml --tags display_variables
+#   ansible-playbook playbooks/full_rke2_config.yml --tags prerequisites
+#   ansible-playbook playbooks/full_rke2_config.yml --tags server
+#   ansible-playbook playbooks/full_rke2_config.yml --tags agent
+
+- name: Display all variables per host (group_vars + host_vars)
+  hosts: all
+  gather_facts: false
+  tasks:
+    # =====================================================
+    # Wait for the hosts to become reachable
+    # =====================================================
+    - name: Wait for hosts to become reachable
+      wait_for_connection:
+
+    - name: Wait for cloud-init to complete
+      shell: cloud-init status
+      register: ci_status
+      changed_when: false
+      failed_when: false
+      until: "'done' in ci_status.stdout"
+      retries: 60
+      delay: 10
+
+- name: Display nodes info
+  hosts: all
+  gather_facts: true
+  tags: [display_variables, always]
+  tasks:
+    # =====================================================
+    # Display information
+    # =====================================================
+    - name: Show hostname details
+      debug:
+        msg: |
+          ============================================
+          HOST: {{ inventory_hostname }}
+          ============================================
+          Inventory Hostname: {{ inventory_hostname }}
+          Ansible User: {{ ansible_user }}
+          Ansible Hostname: {{ ansible_hostname }}
+          Primary IP: {{ ansible_host }}
+          Hostname Override: {{ hostname_override | default('N/A') }}
+          Group Membership: {{ group_names | join(', ') }}
+
+- name: Prepare all nodes
+  hosts: all
+  become: true
+  gather_facts: true
+  tags: [prerequisites]
+  roles:
+    - role: prerequisites
+
+- name: Install RKE2 Control Planes
+  hosts: control_planes
+  become: true
+  gather_facts: true
+  tags: [server]
+  roles:
+    - role: rke2_server
+
+- name: Install RKE2 Workers
+  hosts: workers
+  become: true
+  gather_facts: true
+  tags: [agent]
+  serial: 1
+  roles:
+    - role: rke2_agent

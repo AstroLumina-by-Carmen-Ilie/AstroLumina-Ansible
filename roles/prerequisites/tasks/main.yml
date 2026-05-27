@@ -1,0 +1,87 @@
+---
+- name: Disable swap immediately
+  command: swapoff -a
+  changed_when: false
+
+- name: Disable swap permanently (fstab)
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+    replace: '# \1'
+
+- name: Disable firewalld (if present)
+  service:
+    name: firewalld
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+- name: Disable ufw (if present)
+  service:
+    name: ufw
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+- name: Set hostname
+  hostname:
+    name: "{{ hostname_override | default(inventory_hostname) }}"
+
+- name: Ensure cluster VMs are in /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    line: "{{ item.ip }} {{ item.hostname }}"
+    state: present
+  loop: "{{ etc_hosts_entries }}"
+
+- name: Create RKE2 directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ rke2_config_dir }}"
+    - "{{ rke2_data_dir }}"
+    - "{{ rke2_images_dir }}"
+    - "{{ artifacts_remote_path }}"
+
+- name: Copy RKE2 artifacts to node
+  copy:
+    src: "{{ artifacts_local_path }}/{{ item }}"
+    dest: "{{ artifacts_remote_path }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "rke2.linux-{{ rke2_arch }}.tar.gz"
+    - "rke2-images.linux-{{ rke2_arch }}.tar.zst"
+    - "sha256sum-{{ rke2_arch }}.txt"
+
+- name: Copy install.sh to node
+  copy:
+    src: "{{ artifacts_local_path }}/install.sh"
+    dest: "{{ artifacts_remote_path }}/install.sh"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy container images to images directory
+  copy:
+    src: "{{ artifacts_local_path }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
+    dest: "{{ rke2_images_dir }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install zstd for image decompression
+  apt:
+    name: zstd
+    state: present
+
+- name: Pre-decompress RKE2 images for faster containerd startup
+  shell: |
+    zstd -d --rm -f "{{ rke2_images_dir }}/rke2-images.linux-{{ rke2_arch }}.tar.zst"
+  args:
+    creates: "{{ rke2_images_dir }}/rke2-images.linux-{{ rke2_arch }}.tar"

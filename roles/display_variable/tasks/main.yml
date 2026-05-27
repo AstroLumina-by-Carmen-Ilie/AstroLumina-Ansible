@@ -1,0 +1,14 @@
+---
+# Role: display_variable
+# Purpose: Display a simple variable in shell
+
+- name: Display custom message variable
+  shell: |
+    echo "=== Role: display_variable ==="
+    echo "Message: {{ custom_message }}"
+  changed_when: false
+  register: role_output
+
+- name: Show role output
+  debug:
+    var: role_output.stdout

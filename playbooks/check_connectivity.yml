@@ -1,0 +1,55 @@
+---
+# Usage:
+#   ansible-playbook playbooks/check_connectivity.yml
+
+- name: Display all variables per host (group_vars + host_vars)
+  hosts: all
+  gather_facts: false
+  tasks:
+    # =====================================================
+    # Wait for the hosts to become reachable
+    # =====================================================
+    - name: Wait for hosts to become reachable
+      wait_for_connection:
+
+    - name: Wait for cloud-init to complete
+      shell: cloud-init status
+      register: ci_status
+      changed_when: false
+      failed_when: false
+      until: "'done' in ci_status.stdout"
+      retries: 60
+      delay: 10
+
+- name: Display all variables per host (group_vars + host_vars)
+  hosts: all
+  gather_facts: true
+  tasks:
+    # =====================================================
+    # Display hostname information
+    # =====================================================
+    - name: Show hostname details
+      debug:
+        msg: |
+          ============================================
+          HOST: {{ inventory_hostname }}
+          ============================================
+          Ansible Hostname: {{ ansible_hostname }}
+          Primary IP: {{ ansible_host }}
+          RKE2 Role: {{ rke2_role }}
+
+- name: Call display_variable role with different custom_message per group
+  hosts: control_planes
+  gather_facts: false
+  vars:
+    custom_message: "Message from control_planes group"
+  roles:
+    - display_variable
+
+- name: Call display_variable role with different custom_message per group
+  hosts: workers
+  gather_facts: false
+  vars:
+    custom_message: "Message from workers group"
+  roles:
+    - display_variable

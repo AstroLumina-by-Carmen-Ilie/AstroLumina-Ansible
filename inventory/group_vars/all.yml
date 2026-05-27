@@ -1,0 +1,51 @@
+---
+# Variables for ALL hosts in the inventory
+
+cluster_name: astrolumina
+environment: production
+
+p_name: daniel-pirvu
+p_cidr: 192.168.122.0/24
+
+rke2_cp_01_hostname: "rke2-cp-{{ p_name }}-01"
+rke2_cp_01_ip: "192.168.122.10"
+rke2_worker_01_hostname: "rke2-worker-{{ p_name }}-01"
+rke2_worker_01_ip: "192.168.122.11"
+rke2_worker_02_hostname: "rke2-worker-{{ p_name }}-02"
+rke2_worker_02_ip: "192.168.122.12"
+
+etc_hosts_entries:
+  - ip: "127.0.0.1"
+    hostname: "{{ hostname_override | default(inventory_hostname) }}"
+  - ip: "{{ rke2_cp_01_ip }}"
+    hostname: "{{ rke2_cp_01_hostname }}"
+  - ip: "{{ rke2_worker_01_ip }}"
+    hostname: "{{ rke2_worker_01_hostname }}"
+  - ip: "{{ rke2_worker_02_ip }}"
+    hostname: "{{ rke2_worker_02_hostname }}"
+
+# ============================================================
+# RKE2 Airgap - Global Variables
+# ============================================================
+
+rke2_version: "v1.36.0+rke2r1"
+rke2_arch: "amd64"
+
+rke2_token: "bbdf1f7c611f2d94ae2c556ef1287b1f4dada71ee5f9283be69b57798f5814b2"
+
+artifacts_local_path: "{{ playbook_dir | dirname }}/rke2-artifacts"
+artifacts_remote_path: "/opt/rke2-artifacts"
+
+rke2_server_ip: "{{ hostvars[groups['control_planes'][0]]['ansible_host'] }}"
+
+rke2_api_port: 6443
+
+rke2_config_dir: "/etc/rancher/rke2"
+rke2_data_dir: "/var/lib/rancher/rke2"
+rke2_images_dir: "/var/lib/rancher/rke2/agent/images"
+
+rke2_kubeconfig_path: "/etc/rancher/rke2/rke2.yaml"
+rke2_kubectl_bin_dir: "/var/lib/rancher/rke2/bin"
+
+# export KUBECONFIG="/etc/rancher/rke2/rke2.yaml"
+# export PATH="/var/lib/rancher/rke2/bin:$PATH"

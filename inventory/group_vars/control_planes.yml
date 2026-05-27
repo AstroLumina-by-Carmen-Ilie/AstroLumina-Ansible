@@ -1,0 +1,4 @@
+---
+# Variables for control_planes group (RKE2 servers)
+
+rke2_role: server

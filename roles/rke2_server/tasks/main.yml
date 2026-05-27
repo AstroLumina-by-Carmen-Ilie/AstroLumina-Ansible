@@ -1,0 +1,150 @@
+---
+# RKE2 Server (Control Plane) — installation & configuration
+- name: Check if RKE2 is already installed
+  stat:
+    path: /usr/local/bin/rke2
+  register: rke2_binary
+
+- name: Install RKE2 server from local artifacts (airgap)
+  shell: |
+    INSTALL_RKE2_ARTIFACT_PATH="{{ artifacts_remote_path }}" \
+    INSTALL_RKE2_TYPE="server" \
+    INSTALL_RKE2_VERSION="{{ rke2_version }}" \
+    bash {{ artifacts_remote_path }}/install.sh
+  args:
+    executable: /bin/bash
+  when: not rke2_binary.stat.exists
+  register: rke2_install_result
+
+- name: Display installation output
+  debug:
+    var: rke2_install_result.stdout_lines
+  when: rke2_install_result is changed
+
+- name: Build server configuration
+  set_fact:
+    rke2_server_config:
+      write-kubeconfig-mode: "0644"
+      token: "{{ rke2_token }}"
+      tls-san:
+        - "{{ ansible_host }}"
+        - "{{ hostname_override }}"
+      node-ip: "{{ ansible_host }}"
+      node-name: "{{ hostname_override }}"
+
+- name: Write server config.yaml
+  copy:
+    content: "{{ rke2_server_config | to_nice_yaml(indent=2) }}"
+    dest: "{{ rke2_config_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable and start rke2-server (with retry for D-Bus race)
+  systemd:
+    name: rke2-server
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for rke2-server to be active (max 5 min)
+  wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ rke2_api_port }}"
+    timeout: 300
+    delay: 60
+
+- name: Configure .bashrc
+  blockinfile:
+    path: "{{ item }}"
+    marker: "# {mark} ANSIBLE MANAGED - RKE2 tools"
+    block: |
+      export KUBECONFIG={{ rke2_kubeconfig_path }}
+      export PATH={{ rke2_kubectl_bin_dir }}:$PATH
+
+      crictl() {
+        sudo /var/lib/rancher/rke2/bin/crictl \
+          --config={{ rke2_data_dir }}/agent/etc/crictl.yaml "$@"
+      }
+
+      etcdctl() {
+        local container
+        container=$(sudo /var/lib/rancher/rke2/bin/crictl \
+          --config={{ rke2_data_dir }}/agent/etc/crictl.yaml \
+          ps --label io.kubernetes.container.name=etcd --quiet --latest 2>/dev/null | head -1)
+        if [ -z "$container" ]; then
+          echo "etcd container not found" >&2
+          return 1
+        fi
+        sudo /var/lib/rancher/rke2/bin/crictl \
+          --config={{ rke2_data_dir }}/agent/etc/crictl.yaml \
+          exec "$container" etcdctl \
+          --cert {{ rke2_data_dir }}/server/tls/etcd/server-client.crt \
+          --key {{ rke2_data_dir }}/server/tls/etcd/server-client.key \
+          --cacert {{ rke2_data_dir }}/server/tls/etcd/server-ca.crt "$@"
+      }
+    create: true
+  loop:
+    - /root/.bashrc
+    - /home/ubuntu/.bashrc
+
+- name: Wait for node to be Ready
+  shell: |
+    . ~/.bashrc
+    kubectl get nodes {{ hostname_override }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  register: node_ready
+  until: node_ready.stdout | trim == "True"
+  retries: 60
+  delay: 10
+
+- name: Verify nodes (kubectl get nodes -o wide)
+  shell: |
+    . ~/.bashrc
+    kubectl get nodes -o wide
+  register: verify_nodes
+
+- name: Verify system pods (kubectl get pods -A)
+  shell: |
+    . ~/.bashrc
+    kubectl get pods -A
+  register: verify_pods
+
+- name: Verify running containers (crictl ps)
+  shell: |
+    . ~/.bashrc
+    crictl ps
+  register: verify_crictl
+
+- name: Verify etcd cluster members
+  shell: |
+    . ~/.bashrc
+    etcdctl member list -w table --dial-timeout=5s
+  register: verify_etcd_members
+  ignore_errors: true
+
+- name: Verify etcd endpoint health
+  shell: |
+    . ~/.bashrc
+    etcdctl endpoint health -w table --dial-timeout=5s
+  register: verify_etcd_health
+  ignore_errors: true
+
+- name: Display verification summary
+  debug:
+    msg:
+      - "✅ RKE2 Control Plane installed successfully!"
+      - ""
+      - "── Nodes ──"
+      - "{{ verify_nodes.stdout }}"
+      - ""
+      - "── System Pods ──"
+      - "{{ verify_pods.stdout }}"
+      - ""
+      - "── etcd Members ──"
+      - "{{ verify_etcd_members.stdout | default('N/A') }}"
+      - ""
+      - "── etcd Health ──"
+      - "{{ verify_etcd_health.stdout | default('N/A') }}"
+      - ""
+      - "── Containers ──"
+      - "{{ verify_crictl.stdout | default('N/A') }}"
