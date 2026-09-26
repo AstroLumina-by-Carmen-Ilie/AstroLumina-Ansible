@@ -1,9 +1,17 @@
-# yamllint — strict where it matters, relaxed line length (long Jinja expressions)
+---
+# yamllint — strict where it matters, relaxed line length (long Jinja expressions).
+# The braces/octal-values settings below are MANDATED by ansible-lint's yaml
+# rule: a custom config without them is rejected as incompatible.
 extends: default
 
 rules:
   document-start:
     present: true
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
   truthy:
     allowed-values: ["true", "false", "on"]
     check-keys: false
