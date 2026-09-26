@@ -1,0 +1,15 @@
+# yamllint — strict where it matters, relaxed line length (long Jinja expressions)
+extends: default
+
+rules:
+  document-start:
+    present: true
+  truthy:
+    allowed-values: ["true", "false", "on"]
+    check-keys: false
+  line-length:
+    max: 160
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable

@@ -1,0 +1,18 @@
+# ansible-lint — realistic baseline for the current codebase
+# (modules still use short names instead of FQCN)
+profile: moderate
+offline: true
+verbosity: 1
+
+# fqcn[action-core] would fail on the existing roles (command, copy, service…).
+# Kept as a warning until the FQCN migration, all other rules fail the build.
+warn_list:
+  - fqcn
+
+exclude_paths:
+  - .git/
+  - .github/
+  - rke2-artifacts/
+
+# Connectivity / smoke plays intentionally use shell + ignore_errors
+skip_list: []

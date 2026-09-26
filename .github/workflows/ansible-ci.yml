@@ -1,0 +1,125 @@
+name: Ansible CI
+
+# All third-party actions are pinned to immutable commit SHAs
+# (instead of floating tags) to protect against supply-chain attacks.
+# The original version tag is kept as a trailing comment for readability.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "playbooks/**"
+      - "roles/**"
+      - "inventory/**"
+      - "ansible.cfg"
+      - "scripts/**"
+      - ".github/workflows/ansible-ci.yml"
+      - ".ansible-lint"
+      - ".yamllint.yml"
+  pull_request:
+    paths:
+      - "playbooks/**"
+      - "roles/**"
+      - "inventory/**"
+      - "ansible.cfg"
+      - "scripts/**"
+      - ".github/workflows/ansible-ci.yml"
+      - ".ansible-lint"
+      - ".yamllint.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ansible-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  yamllint:
+    name: YAML Lint (format & syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: yamllint -s .
+
+  ansible-lint:
+    name: Ansible Lint (best practices)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ansible + ansible-lint
+        run: pip install "ansible>=2.14" ansible-lint
+
+      - name: Run ansible-lint
+        run: ansible-lint --force-color --offline
+        # --offline: no Galaxy access required in CI.
+        # Lenient rules (warn_list) live in the .ansible-lint file.
+
+  syntax-check:
+    name: Syntax check playbooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ansible
+        run: pip install "ansible>=2.14"
+
+      - name: Validate inventory
+        run: |
+          ansible-inventory -i inventory/inventory.yml --list > /dev/null
+          ansible-inventory -i inventory/inventory.yml --graph
+
+      - name: Syntax check — check_connectivity
+        run: ansible-playbook --syntax-check -i inventory/inventory.yml playbooks/check_connectivity.yml
+
+      - name: Syntax check — full_rke2_config
+        run: ansible-playbook --syntax-check -i inventory/inventory.yml playbooks/full_rke2_config.yml
+
+      - name: Check playbooks parse (ansible-playbook --list-tasks)
+        run: |
+          ansible-playbook -i inventory/inventory.yml playbooks/check_connectivity.yml --list-tasks
+          ansible-playbook -i inventory/inventory.yml playbooks/full_rke2_config.yml --list-tasks
+
+  shellcheck:
+    name: ShellCheck (scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+        with:
+          scandir: "./scripts"
+          severity: warning
+
+  gitleaks:
+    name: Gitleaks (exposed secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
