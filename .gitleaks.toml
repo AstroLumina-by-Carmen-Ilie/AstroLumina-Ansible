@@ -1,0 +1,10 @@
+# Gitleaks allowlist for lab-only credentials that are intentionally committed.
+# This file is merged with the built-in rules: only the entries below are
+# ignored, everything else is still reported as a leak.
+
+[allowlist]
+description = "RKE2 cluster join token for the local lab/airgap cluster. Intentionally stored in group_vars (see README); not a production secret."
+regexTarget = "line"
+regexes = [
+    '''rke2_token:''',
+]

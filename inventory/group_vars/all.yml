@@ -2,7 +2,7 @@
 # Variables for ALL hosts in the inventory
 
 cluster_name: astrolumina
-environment: production
+deployment_environment: production
 
 p_name: daniel-pirvu
 p_cidr: 192.168.122.0/24

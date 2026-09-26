@@ -17,7 +17,7 @@
       wait_for_connection:
 
     - name: Wait for cloud-init to complete
-      shell: cloud-init status
+      command: cloud-init status
       register: ci_status
       changed_when: false
       failed_when: false
