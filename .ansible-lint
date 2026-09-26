@@ -10,11 +10,11 @@ verbosity: 1
 warn_list:
   - fqcn
 
-# var-name[no-role-prefix] is intentionally skipped: the existing registers
+# var-naming[no-role-prefix] is intentionally skipped: the existing registers
 # (rke2_binary, verify_nodes, ...) predate the prefix convention and renaming
 # them all is out of scope. New code should still use role-prefixed names.
 skip_list:
-  - var-name
+  - var-naming
 
 exclude_paths:
   - .git/
